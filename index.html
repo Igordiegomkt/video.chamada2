@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chamada em Vídeo WhatsApp</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{
+    font-family:'Segoe UI',sans-serif;
+    background:#000;color:#fff;
+    height:100vh;display:flex;
+    justify-content:center;align-items:center;overflow:hidden;
+  }
+  .container{
+    width:100%;max-width:800px;
+    height: 100dvh; /* Usa dvh para viewport dinâmica em navegadores modernos */
+    height: 100vh;  /* Fallback para navegadores mais antigos */
+    background:#000;border-radius:0;overflow:hidden;
+    position:relative;box-shadow:0 20px 40px rgba(0,0,0,0.8);
+    display: flex; 
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.3s ease-in-out; /* Transição suave para pseudo-fullscreen */
+  }
+  /* Estilos para o container quando em tela cheia (nativa - Android/Desktop) */
+  .container:-webkit-full-screen,
+  .container:-moz-full-screen,
+  .container:-ms-fullscreen,
+  .container:fullscreen { 
+    width: 100%; 
+    height: 100%; 
+    max-width: 100vw; /* Garante que preenche a tela */
+    position: fixed; /* Pode ser necessário para alguns navegadores */
+    top: 0; left: 0;
+  }
+
+  /* Estilos para o container quando em pseudo-tela cheia (iOS) */
+  .pseudo-fullscreen-active {
+    position: fixed; /* Fixa o container na viewport */
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100dvh; /* Usa dvh para a altura dinâmica */
+    height: 100vh; /* Fallback */
+    max-width: 100vw; /* Garante que preenche a tela */
+    z-index: 9999; /* Fica acima de tudo */
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  #video{
+    width:100%;height:100%;
+    object-fit:cover; /* Para preencher a área sem distorção */
+    display:none; /* É controlado por JS para aparecer apenas quando pronto, inicialmente escondido */
+    flex-grow: 1; /* Permite que o vídeo cresça e preencha o espaço disponível */
+    
+    /* --- TENTATIVAS DE OCULTAR CONTROLES NATIVOS EM TELA CHEIA (PODE NÃO FUNCIONAR SEMPRE) --- */
+    /* Regras para tentar esconder os controles nativos que o navegador pode injetar em fullscreen. */
+    /* A eficácia varia muito entre navegadores e sistemas operacionais. */
+    &::-webkit-media-controls { display: none !important; }
+    &::-webkit-media-controls-enclosure { display: none !important; }
+    &::-webkit-media-controls-panel { display: none !important; }
+    &::-webkit-media-controls-play-button { display: none !important; }
+    &::-webkit-media-controls-timeline { display: none !important; }
+    &::-webkit-media-controls-current-time-display { display: none !important; }
+    &::-webkit-media-controls-time-remaining-display { display: none !important; }
+    &::-webkit-media-controls-mute-button { display: none !important; }
+    &::-webkit-media-controls-volume-slider { display: none !important; }
+    &::-webkit-media-controls-fullscreen-button { display: none !important; }
+    /* Para Firefox */
+    &::--moz-media-controls { display: none !important; }
+    &::--moz-media-controls-enclosure { display: none !important; }
+    opacity: 1 !important; /* Certifica que o vídeo está visível */
+    /* ------------------------------------------------------------------------------------------ */
+  }
+  .loader{
+    position:absolute;top:50%;left:50%;
+    transform:translate(-50%,-50%);
+    border:6px solid rgba(255,255,255,0.2);
+    border-top:6px solid white;border-radius:50%;
+    width:50px;height:50px;
+    animation:spin 1s linear infinite;
+    z-index:100;
+    display: none; /* Inicialmente escondido */
+  }
+  @keyframes spin{0%{transform:translate(-50%,-50%) rotate(0deg);}100%{transform:translate(-50%,-50%) rotate(360deg);} }
+  .alerta,.call-ended{
+    position:absolute;top:50%;left:50%;
+    transform:translate(-50%,-50%);
+    padding:15px 25px;border-radius:10px;text-align:center;
+    z-index:200;display:none;
+  }
+  .alerta{background:red;color:#fff;}
+  .call-ended{background:rgba(0,0,0,0.7);color:#fff;font-size:24px;}
+  
+  /* Cabeçalho estilo WhatsApp */
+  .wa-header {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(0,0,0,0.6);
+    padding: 10px 15px;
+    z-index: 180; /* Z-index mais alto para garantir visibilidade */
+    width: 100%; 
+  }
+  .wa-header .avatar {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+  .wa-header .info {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+  }
+  .wa-header .name {
+    font-size: 16px;
+    font-weight: bold;
+    color: #fff;
+  }
+  .wa-header .status {
+    font-size: 13px;
+    color: #ccc;
+  }
+
+  .client-preview{
+    position:absolute;
+    top: 70px; /* Ponto 2: Mover para o canto superior direito, abaixo do cabeçalho */
+    right:10px;
+    width:100px;height:130px;
+    z-index:170; /* Z-index mais alto para garantir visibilidade */
+    opacity:0;animation:show-client 0.6s 2s forwards;
+  }
+  /* Garante que o client-preview fique visível em fullscreen (nativo ou pseudo) */
+  .container:fullscreen .client-preview,
+  .container:-webkit-full-screen .client-preview,
+  .pseudo-fullscreen-active .client-preview {
+    opacity: 1 !important; /* Força a visibilidade */
+    animation: none; /* Desativa a animação de delay */
+  }
+  @keyframes show-client{to{opacity:1;}}
+  .client-box{
+    width:100%;height:100%;
+    background:#111;border:2px solid #fff;border-radius:10px;
+    display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+    position:relative;overflow:hidden;
+  }
+  .client-box video{width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;}
+  .client-box p{
+    position:absolute;bottom:20px;z-index:2;
+    background:rgba(0,0,0,0.6);padding:2px 6px;border-radius:6px;
+  }
+  .dot{
+    width:10px;height:10px;background:#4CAF50;border-radius:50%;
+    margin-top:5px;box-shadow:0 0 5px #4CAF50;
+    animation:blink 1.5s infinite;position:absolute;bottom:5px;
+  }
+  @keyframes blink{0%,100%{opacity:1;}50%{opacity:0.5;}}
+  
+  /* Botão de Sair da Tela Cheia */
+  button#exitFullscreenBtn {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    z-index: 190; /* Acima de tudo */
+    display: none; /* Escondido por padrão, só aparece em fullscreen */
+  }
+
+  /* Novo botão de iniciar chamada */
+  #startCallBtn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 15px 30px;
+    font-size: 20px;
+    background: #25D366; /* Verde WhatsApp */
+    color: #fff;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    z-index: 200;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    transition: background 0.3s ease;
+  }
+  #startCallBtn:hover {
+    background: #1DA851;
+  }
+
+  /* Responsividade */
+  @media (max-width:600px){
+    .client-preview{
+      width:70px;height:90px;
+      top: 70px;
+      right: 10px;
+    }
+    .wa-header .name{font-size:14px;}
+    .wa-header .status{font-size:12px;}
+    .wa-header{
+      flex-direction: row; 
+      align-items: center;
+      gap: 10px; 
+      text-align: left; 
+    }
+    .wa-header .avatar{
+      width: 35px;
+      height: 35px;
+    }
+    .wa-header .info{
+      text-align: left; 
+    }
+    #video{
+      object-fit:contain; /* Usa 'contain' para garantir que o vídeo inteiro seja visível */
+    }
+    #startCallBtn {
+      font-size: 16px;
+      padding: 12px 25px;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="container" id="mainContainer">
+  <div class="loader" id="loader"></div>
+
+  <!-- *** MUDANÇA 1: Atributo 'muted' ADICIONADO conforme solicitado *** -->
+  <video id="video" playsinline preload="metadata" muted> 
+    Seu navegador não suporta vídeo.
+  </video>
+
+  <!-- Cabeçalho estilo WhatsApp -->
+  <div class="wa-header">
+    <img src="media/avatar.jpg" alt="Avatar do Contato" class="avatar">
+    <div class="info">
+      <p class="name">Carol Andrade</p>
+      <p class="status" id="status">Aguardando interação...</p>
+    </div>
+  </div>
+
+  <div class="client-preview">
+    <div class="client-box">
+      <video id="cameraPreview" autoplay muted playsinline></video>
+      <p>Você</p>
+      <span class="dot"></span>
+    </div>
+  </div>
+
+  <div id="alerta" class="alerta"></div>
+  <div id="callEnded" class="call-ended">Chamada Encerrada</div>
+  
+  <!-- NOVO BOTÃO DE INTERAÇÃO -->
+  <button id="startCallBtn">Iniciar Chamada</button>
+  
+  <button id="exitFullscreenBtn">Sair Tela Cheia</button>
+</div>
+
+<script>
+const mainContainer = document.getElementById('mainContainer');
+const video = document.getElementById('video');
+const loader = document.getElementById('loader');
+const alerta = document.getElementById('alerta');
+const callEnded = document.getElementById('callEnded');
+const statusElement = document.getElementById('status');
+const cameraPreviewElement = document.getElementById('cameraPreview');
+const clientBoxElement = cameraPreviewElement.closest('.client-box');
+const exitFullscreenBtn = document.getElementById('exitFullscreenBtn');
+const startCallBtn = document.getElementById('startCallBtn'); // Referência ao novo botão
+
+// --- URL do seu vídeo no Backblaze B2 ---
+// *** MUDANÇA 2: URL alterada conforme solicitado ***
+const VIDEO_BACKBLAZE_URL = 'https://chamadadevideo.s3.us-east-005.backblazeb2.com/VIDEO-CHAMADA.mp4'; 
+
+// --- Detectar iOS ---
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+// --- Bloquear download do vídeo e controles nativos de toque ---
+// Impede o menu de contexto (botão direito / long press)
+video.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+});
+// Tenta impedir o download em toques mais longos e impede gestos padrão do navegador
+video.addEventListener('touchstart', (e) => {
+  // e.preventDefault(); // Remover preventDefault aqui pode permitir alguns gestos mas pode reintroduzir controles. Teste!
+});
+
+
+// Função para iniciar streaming do vídeo principal
+function startVideo() {
+  startCallBtn.style.display = 'none'; // Esconde o botão de iniciar
+  loader.style.display = 'block';
+  video.style.display = 'none'; // Garante que o vídeo esteja escondido enquanto carrega
+  statusElement.textContent = "Conectando...";
+
+  video.src = VIDEO_BACKBLAZE_URL; 
+  video.load(); // Solicita ao navegador para começar a carregar o vídeo
+
+  video.oncanplaythrough = () => {
+    loader.style.display = 'none';
+    video.style.display = 'block';
+    statusElement.textContent = "Em chamada...";
+
+    video.play().then(() => {
+      // O vídeo tocará MUTADO, pois o atributo foi adicionado ao HTML.
+
+      if (isIOS) {
+        // No iOS, usamos pseudo-tela cheia para o mainContainer para manter a UI visível.
+        mainContainer.classList.add('pseudo-fullscreen-active');
+        exitFullscreenBtn.style.display = 'block'; 
+      } else {
+        // Para Android/Desktop, usamos tela cheia nativa para o mainContainer.
+        // Isso deve funcionar agora devido à interação explícita do usuário.
+        requestNativeFullscreen(mainContainer); 
+      }
+
+    }).catch(error => {
+      console.error("Falha ao reproduzir vídeo ou solicitar tela cheia:", error);
+      // Se o erro for NotAllowedError, é provável que seja um bloqueio do navegador (menos provável com interação).
+      if (error.name === "NotAllowedError" || error.name === "AbortError") {
+          alerta.style.display = 'block';
+          alerta.textContent = "A reprodução foi bloqueada. Por favor, tente novamente.";
+          statusElement.textContent = "Ação Necessária!";
+          startCallBtn.style.display = 'block'; // Mostra o botão novamente para tentar de novo
+      } else {
+          alerta.style.display = 'block';
+          alerta.textContent = "Não foi possível iniciar o vídeo.";
+          statusElement.textContent = "Erro!";
+      }
+      loader.style.display = 'none'; // Esconde o loader em caso de erro.
+    });
+  };
+
+  video.onerror = () => {
+    loader.style.display = 'none';
+    alerta.style.display = 'block';
+    alerta.textContent = `Erro ao carregar o vídeo! Verifique a URL: ${VIDEO_BACKBLAZE_URL}`; // Mensagem mais específica
+    statusElement.textContent = "Erro!";
+    console.error(`Erro ao carregar vídeo: ${VIDEO_BACKBLAZE_URL}`);
+    startCallBtn.style.display = 'block'; // Mostra o botão novamente em caso de erro.
+  };
+}
+
+// Função auxiliar para solicitar tela cheia nativa
+function requestNativeFullscreen(element) {
+  if (element.requestFullscreen) {
+    element.requestFullscreen();
+  } else if (element.webkitRequestFullscreen) { // Safari
+    element.webkitRequestFullscreen();
+  } else if (element.mozRequestFullScreen) { // Firefox
+    element.mozRequestFullScreen();
+  } else if (element.msRequestFullscreen) { // IE/Edge
+    element.msRequestFullscreen();
+  }
+}
+
+// Função auxiliar para sair da tela cheia (nativa ou pseudo)
+function exitFullscreen() {
+  if (mainContainer.classList.contains('pseudo-fullscreen-active')) {
+    // Sai da pseudo-tela cheia no iOS
+    mainContainer.classList.remove('pseudo-fullscreen-active');
+    exitFullscreenBtn.style.display = 'none';
+  } else if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+    // Sai da tela cheia nativa (Android/Desktop)
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    } else if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    } else if (document.mozCancelFullScreen) {
+      document.mozCancelFullScreen();
+    } else if (document.msExitFullscreen) {
+      document.msExitFullscreen();
+    }
+  }
+}
+
+// Lógica para o botão de sair da tela cheia e detecção de fullscreen
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+    // Entrou em tela cheia nativa
+    exitFullscreenBtn.style.display = 'block';
+  } else {
+    // Saiu da tela cheia nativa
+    if (!mainContainer.classList.contains('pseudo-fullscreen-active')) {
+      exitFullscreenBtn.style.display = 'none';
+    }
+  }
+});
+
+exitFullscreenBtn.addEventListener('click', exitFullscreen); // Atribui a função ao botão
+startCallBtn.addEventListener('click', startVideo); // Atribui a função startVideo ao clique do novo botão
+
+// Define o status inicial no cabeçalho
+statusElement.textContent = "Aguardando interação...";
+
+// Adiciona listener para quando o vídeo principal terminar
+video.addEventListener('ended', () => {
+  callEnded.style.display = 'block';
+  video.style.display = 'none';
+  exitFullscreen(); // Garante que saia da tela cheia (nativa ou pseudo) ao final da chamada
+  setTimeout(() => { window.location.href = 'https://modelo.life/chamada.whatsapp.app'; }, 3000);
+});
+
+// Captura da câmera do usuário para a pré-visualização
+navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+  .then(stream => {
+    cameraPreviewElement.srcObject = stream;
+  })
+  .catch(err => {
+    console.error("Erro ao acessar a câmera:", err);
+    if (clientBoxElement) {
+        clientBoxElement.style.background = '#333';
+        clientBoxElement.style.display = 'flex';
+        clientBoxElement.style.justifyContent = 'center';
+        clientBoxElement.style.alignItems = 'center';
+        clientBoxElement.innerHTML = '<p style="position: static; color: white; font-size: 12px; padding: 5px;">Câmera<br>indisponível</p>'; 
+    } else {
+        alert("Não foi possível acessar a câmera do seu dispositivo.");
+    }
+  });
+
+// --- NOTA IMPORTANTE SOBRE TRAVAMENTOS DE VÍDEO NO ANDROID ---
+// Se o vídeo estiver travando no Android, é quase certo que a causa está no próprio arquivo de vídeo
+// ou nas capacidades de hardware do dispositivo. O JavaScript e CSS fornecidos são eficientes e não
+// introduzem gargalos significativos. Para melhorar o desempenho do vídeo:
+// 1. Otimize o arquivo de vídeo:
+//    - Reduza a resolução (ex: 720p em vez de 1080p, ou 480p para foco mobile).
+//    - Diminua a taxa de bits (bitrate) do vídeo.
+//    - Use um codec de vídeo eficiente como H.264 (perfil Baseline ou Main).
+//    - Certifique-se de que o vídeo não seja excessivamente longo ou de tamanho de arquivo muito grande.
+// 2. Verifique a conexão de rede: Uma conexão lenta pode causar buffering e travamentos.
+</script>
+</body>
+</html>
