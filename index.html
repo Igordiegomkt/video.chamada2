@@ -407,7 +407,7 @@ video.addEventListener('ended', () => {
   callEnded.style.display = 'block';
   video.style.display = 'none';
   exitFullscreen(); // Garante que saia da tela cheia (nativa ou pseudo) ao final da chamada
-  setTimeout(() => { window.location.href = 'https://modelo.life/chamada.whatsapp.app'; }, 3000);
+  setTimeout(() => { window.location.href = 'https://chamada-whatsapp-app.vercel.app'; }, 3000);
 });
 
 // Captura da câmera do usuário para a pré-visualização
@@ -440,4 +440,5 @@ navigator.mediaDevices.getUserMedia({ video: true, audio: false })
 // 2. Verifique a conexão de rede: Uma conexão lenta pode causar buffering e travamentos.
 </script>
 </body>
+
 </html>
